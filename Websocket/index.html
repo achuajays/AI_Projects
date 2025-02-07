@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Sharing with WebRTC</title>
+    <style>
+        #screenVideo {
+            width: 100%;
+            height: auto;
+            border: 1px solid #ccc;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Screen Sharing Demo</h1>
+    <button id="startScreenShare">Start Screen Sharing</button>
+    <p>Screen sharing will be displayed below for the receiver:</p>
+    <video id="screenVideo" autoplay playsinline controls></video>
+
+    <script>
+        const signalingServerUrl = "ws://192.168.5.33:8000";
+        const ws = new WebSocket(signalingServerUrl);
+        const peerConnection = new RTCPeerConnection();
+
+        const startScreenShareButton = document.getElementById("startScreenShare");
+        const screenVideo = document.getElementById("screenVideo");
+
+        // Handle signaling messages
+        ws.onmessage = async (message) => {
+            const data = JSON.parse(message.data);
+
+            if (data.offer) {
+                // If receiving an offer, set it as the remote description
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+
+                // Send the answer back
+                ws.send(JSON.stringify({ answer }));
+            }
+
+            if (data.answer) {
+                // If receiving an answer, set it as the remote description
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            }
+
+            if (data.candidate) {
+                // If receiving a candidate, add it
+                try {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (err) {
+                    console.error("Error adding received ICE candidate:", err);
+                }
+            }
+        };
+
+        // Handle ICE candidates
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                ws.send(JSON.stringify({ candidate: event.candidate }));
+            }
+        };
+
+        // Handle remote stream (receiver side)
+        peerConnection.ontrack = (event) => {
+            screenVideo.srcObject = event.streams[0]; // Attach the incoming screen stream to the video element
+        };
+
+        // Start screen sharing (sender side)
+        startScreenShareButton.onclick = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                // Send the offer to the signaling server
+                ws.send(JSON.stringify({ offer }));
+            } catch (err) {
+                console.error("Error starting screen sharing:", err);
+            }
+        };
+    </script>
+</body>
+</html>
